@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+
+function getParamName()
+{
+	local paramName=$2;
+	if [ "${2#*=}" != "$2" ]; then
+		paramName="${2%=*}";
+	fi
+	eval "$1=$paramName";
+}
+
+function prepareNotRMDir()
+{
+	if [[ $1 =~  ^\[.+?\]$ ]]; then
+		strExcludeDir=${1:1:${#1}-2}
+		local excDir=($(echo $strExcludeDir | tr "," "\n"));
+
+		declare -a validExcDir=()
+		for dir in "${excDir[@]}"
+		do
+			#if [ -d $dir ] || [ -f $dir ]; then
+				validExcDir+=("$dir")
+			#fi
+		done
+
+		echo ${validExcDir[@]}	
+	fi
+}
+
+function prepareExludeDirFromContainer()
+{
+	local excludeDir=(${@})
+
+	if [[ ${#excludeDir[@]} == 0 ]]; then
+		echo ""
+		return
+	fi
+
+	local preparedExclDir="!("
+	for item in ${excludeDir[@]}
+	do
+		preparedExclDir+="$item"
+		preparedExclDir+="|"
+	done
+
+	preparedExclDir=${preparedExclDir:0:${#preparedExclDir}-1}
+	preparedExclDir+=")"
+
+	echo "${preparedExclDir}"
+}
+
+function checkDay()
+{
+	if [[ ! $1 =~ ^([0-9]{1})(:[0-9]{1,2}(:[0-9]{4})?)?$ ]]; then
+		return 1
+	fi
+
+	local day=$(echo "${1}" | sed 's/\([0-9]\{1\}\)\(:[0-9]\{1\,2\}\(:[0-9]\{4\}\)\?\)\?/\1/');
+	if [[ $day > 0 ]] && [[ $day < 8 ]]; then
+		return 1;
+	fi
+	return 0;
+}
+
+function checkMonth()
+{
+	if [[ ! $1 =~ ^[0-9]{1}:[0-9]{1,2}(:[0-9]{4})?$ ]]; then
+		return 1
+	fi
+	
+	local month=$(echo "${1}" | sed 's/[0-9]\{1\}:\([0-9]\{1,2\}\)/\1/');
+	if [[ $month > 0 ]] && [[ $month < 13 ]]; then
+		return 1;
+	fi
+	return 0;
+}
+
+function checkYear()
+{
+	if [[ ! $1 =~ ^[0-9]{1}:[0-9]{1,2}:[0-9]{4}$ ]]; then
+		return 1
+	fi
+	
+	local year=$(echo "${1}" | sed 's/[0-9]\{1\}:[0-9]\{1,2\}:\([0-9]\+\)/\1/');
+	if [[ $year =~ ^[0-9]{4}$ ]]; then
+		return 1;
+	fi
+	return 0;	
+}
+
+function getDay()
+{
+	local day=$(echo "${1}" | sed 's/\([0-9]\{1\}\)\(:[0-9]\{1\,2\}\(:[0-9]\{4\}\)\?\)\?/\1/');
+
+	echo "${day}"
+}
+
+function getMonth()
+{
+	if [[ ! $1 =~ ^[0-9]{1}:[0-9]{1,2}(:[0-9]{4})?$ ]]; then
+		return
+	fi
+
+	local month=$(echo "${1}" | sed 's/[0-9]\{1\}:\([0-9]\{1\,2\}\)\(:[0-9]\{4\}\)\?/\1/');
+
+	echo "${month}"
+}
+
+function getYear()
+{
+	if [[ ! $1 =~ ^[0-9]{1}:[0-9]{1,2}:[0-9]{4}$ ]]; then
+		return
+	fi
+
+	local year=$(echo "${1}" | sed 's/[0-9]\{1\}:[0-9]\{1\,2\}:\([0-9]\+\)/\1/');
+	
+	echo "${year}"	
+}
+
+while [ 1 ]; do
+	if [ "${1#--directory=}" != "$1" ]; then
+		pDirectory="${1#--directory=}"
+	elif [ "$1" = "-d" ]; then
+		shift; pDirectory="$1"
+	elif [ "${1#--exclude=}" != "$1" ]; then
+		pExclude="${1#--exclude=}"
+	elif [ "$1" = "-e" ]; then
+		shift; pExclude="$1"
+	elif [ "${1#--time=}" != "$1" ]; then
+		pTime="${1#--time=}"
+	elif [ "$1" = "-t" ]; then
+		shift; pTime="$1"	
+	elif [ -z "$1" ]; then
+			break
+	else
+		retWrongParam=''
+		getParamName retWrongParam $1
+		echo "Error: parameter [$retWrongParam] is wrong "
+		exit
+	fi
+	shift
+done
+
+if [ ! -d $pDirectory ]; then
+	echo "The director [ $pDirectory ] doesn't exist";
+	exit
+fi
+
+if [[ ${#pTime} > 0 ]] && [[ ! $pTime =~ ^[0-9](:[0-9]{1,2}(:[0-9]{4})?)?$ ]]; then
+	echo "The format of time is wrong"
+	exit
+fi
+
+if checkDay $pTime; then
+	echo "The day from time is wrong"
+	exit
+fi
+
+if checkMonth $pTime; then
+	echo "The month from time is wrong"
+	exit;
+fi
+
+if checkYear $pTime; then
+	echo "The year from time is wrong"
+	exit;
+fi
+
+day=$(getDay $pTime)
+if [[ ${#day} > 0 ]]; then
+	curDay=$(date +"%u")
+	if [[ $curDay != $day ]]; then
+		exit
+	fi
+
+	month=$(getMonth $pTime)
+	if [[ ${#month} > 0 ]]; then
+		curMonth=$(date +"%m")
+		if [[ $curMonth != $month ]]; then
+			exit
+		fi
+	fi
+
+	year=$(getYear $pTime)
+	if [[ ${#year} > 0 ]]; then
+		curYear=$(date +"%G")
+		if [[ $curYear != $year ]]; then
+			exit;
+		fi
+	fi
+fi
+
+excludeFiles=($(prepareNotRMDir $pExclude))
+
+#set -x
+excludeFilesOption=$(prepareExludeDirFromContainer ${excludeFiles[@]})
+#set +x
+
+cd $pDirectory
+#set -x
+if [[ ${#excludeFilesOption} > 0 ]]; then
+	#rm -fr $excludeFilesOption
+	shopt -s extglob 
+	cmd='rm -fr '${excludeFilesOption}
+	eval $cmd
+else
+	rm -fr ./*
+fi
+#set +x
